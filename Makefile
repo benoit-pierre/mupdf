@@ -49,12 +49,13 @@ QUIET_GEN = @ echo ' ' ' ' GEN $@ ;
 QUIET_LINK = @ echo ' ' ' ' LINK $@ ;
 QUIET_MKDIR = @ echo ' ' ' ' MKDIR $@ ;
 QUIET_RM = @ echo ' ' ' ' RM $@ ;
+quiet_msg = @ echo ' ' ' ' $1 ;
 endif
 
 CC_CMD = $(QUIET_CC) $(CC) $(CFLAGS) -o $@ -c $<
 CXX_CMD = $(QUIET_CXX) $(CXX) $(CFLAGS) -o $@ -c $<
 AR_CMD = $(QUIET_AR) $(AR) cr $@ $^
-LINK_CMD = $(QUIET_LINK) $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
+LINK_CMD = $(QUIET_LINK) $(CC) $(LDFLAGS) -o $@
 MKDIR_CMD = $(QUIET_MKDIR) mkdir -p $@
 RM_CMD = $(QUIET_RM) rm -f $@
 
@@ -123,11 +124,78 @@ $(HTML_OBJ) : $(FITZ_HDR) $(HTML_HDR) $(HTML_SRC_HDR)
 
 # --- Library ---
 
-MUPDF_LIB := $(OUT)/libmupdf.a
+MUPDF_STATIC_LIB := $(OUT)/libmupdf.a
+MUPDF_LIB := $(MUPDF_STATIC_LIB)
 
-$(MUPDF_LIB) : $(FITZ_OBJ) $(PDF_OBJ) $(XPS_OBJ) $(CBZ_OBJ) $(HTML_OBJ)
+MUPDF_OBJ := $(FITZ_OBJ) $(PDF_OBJ) $(XPS_OBJ) $(CBZ_OBJ) $(HTML_OBJ)
 
-INSTALL_LIBS := $(MUPDF_LIB)
+$(MUPDF_STATIC_LIB) : $(MUPDF_OBJ)
+
+INSTALL_LIBS := $(MUPDF_STATIC_LIB)
+
+define gen_link_target
+$($1) : $($1_OBJ) $(filter-out -%,$($1_LIBS))
+	$$(LINK_CMD) $($1_OBJ) $(subst $(MUPDF_LIB),-L$(OUT) -lmupdf,$($1_LIBS))
+endef
+
+ifeq "$(BUILD_MUPDF_SHARED_LIB)" "yes"
+
+MUPDF_SHARED_LIB := $(OUT)/libmupdf.so
+MUPDF_LIB := $(MUPDF_SHARED_LIB)
+
+$(MUPDF_SHARED_LIB) : $(MUPDF_OBJ) $(THIRD_LIBS)
+	$(RM_CMD)
+	$(call quiet_msg,GEN $(OUT)/mupdf.exports) { \
+	      echo '{'; \
+	      nm --defined-only --format=posix $(MUPDF_OBJ) | sed -n 's/^\([A-Za-z_][0-9A-Za-z_]*\) [BbGgRrSsTt] .*$$/\1;/p'; \
+	      echo '};'; \
+	} >$(OUT)/mupdf.exports
+	$(LINK_CMD) -shared -Wl,--exclude-libs=ALL,--dynamic-list=$(OUT)/mupdf.exports,--no-undefined $^ $(LIBS)
+
+# Thirdparty curl depends on thirdparty zlib.
+ifneq "$(CURL_LIB)" ""
+CURL_LIB += $(ZLIB_LIB)
+endif
+
+THIRD_LIBS :=
+
+INSTALL_LIBS += $(MUPDF_SHARED_LIB)
+
+endif
+
+ifeq "$(BUILD_MUPDF_DLL)" "yes"
+
+MUPDF_DLL := $(OUT)/mupdf.dll
+MUPDF_DEF := $(OUT)/mupdf.def
+MUPDF_LIB := $(OUT)/mupdf.lib
+MUPDF_DLLTOOL_OUTPUTS := $(MUPDF_DEF) $(MUPDF_LIB) $(OUT)/mupdf_exports.o
+
+# Use pattern rule so make use a single invocation.
+$(OUT)/%.def $(OUT)/%.lib $(OUT)/%_exports.o: $(OUT)/lib%.a
+	$(call quiet_msg,RM $(MUPDF_DLLTOOL_OUTPUTS)) \
+		rm -f $(MUPDF_DEF) $(MUPDF_LIB) $(OUT)/mupdf_exports.o
+	$(call quiet_msg,GEN $(MUPDF_DLLTOOL_OUTPUTS)) \
+		$(DLLTOOL) \
+		-D $(notdir $(MUPDF_DLL)) \
+		-z $(MUPDF_DEF) \
+		-l $(MUPDF_LIB) \
+		-e $(OUT)/mupdf_exports.o \
+		--export-all-symbols $<
+
+$(MUPDF_DLL): $(OUT)/mupdf_exports.o $(MUPDF_STATIC_LIB) $(THIRD_LIBS)
+	$(RM_CMD)
+	$(LINK_CMD) -static-libgcc -shared -Wl,--no-undefined $^ $(LIBS)
+
+THIRD_LIBS :=
+
+INSTALL_LIBS += $(MUPDF_DLL)
+
+define gen_link_target
+$($1) : $($1_OBJ) $(filter-out -%,$($1_LIBS))
+	$$(LINK_CMD) $($1_OBJ) $($1_LIBS)
+endef
+
+endif
 
 # --- Rules ---
 
@@ -140,7 +208,7 @@ $(OUT)/%.a :
 	$(RANLIB_CMD)
 
 $(OUT)/%: $(OUT)/%.o
-	$(LINK_CMD)
+	$(LINK_CMD) $^
 
 $(OUT)/%.o : source/%.c | $(ALL_DIR)
 	$(CC_CMD)
@@ -235,45 +303,39 @@ $(OUT)/cmapdump.o : include/mupdf/pdf/cmap.h source/pdf/pdf-cmap.c source/pdf/pd
 
 MUDRAW := $(addprefix $(OUT)/, mudraw)
 MUDRAW_OBJ := $(addprefix $(OUT)/tools/, mudraw.o)
+MUDRAW_LIBS := $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS)
 $(MUDRAW_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUDRAW) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUDRAW) : $(MUDRAW_OBJ)
-	$(LINK_CMD)
+$(eval $(call gen_link_target,MUDRAW))
 
 MUTOOL := $(addprefix $(OUT)/, mutool)
 MUTOOL_OBJ := $(addprefix $(OUT)/tools/, mutool.o pdfclean.o pdfextract.o pdfinfo.o pdfposter.o pdfshow.o pdfpages.o)
-$(MUTOOL_OBJ): $(FITZ_HDR) $(PDF_HDR)
-$(MUTOOL) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUTOOL) : $(MUTOOL_OBJ)
-	$(LINK_CMD)
+MUTOOL_LIBS := $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS)
+$(eval $(call gen_link_target,MUTOOL))
 
 MJSGEN := $(OUT)/mjsgen
-$(MJSGEN) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MJSGEN) : $(addprefix $(OUT)/tools/, mjsgen.o)
-	$(LINK_CMD)
+MJSGEN_OBJ := $(addprefix $(OUT)/tools/, mjsgen.o)
+MJSGEN_LIBS := $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS)
+$(eval $(call gen_link_target,MJSGEN))
 
 MUJSTEST := $(OUT)/mujstest
 MUJSTEST_OBJ := $(addprefix $(OUT)/platform/x11/, jstest_main.o pdfapp.o)
+MUJSTEST_LIBS := $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS)
 $(MUJSTEST_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUJSTEST) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUJSTEST) : $(MUJSTEST_OBJ)
-	$(LINK_CMD)
+$(eval $(call gen_link_target,MUJSTEST))
 
 ifeq "$(HAVE_X11)" "yes"
 MUVIEW_X11 := $(OUT)/mupdf-x11
 MUVIEW_X11_OBJ := $(addprefix $(OUT)/platform/x11/, x11_main.o x11_image.o pdfapp.o)
+MUVIEW_X11_LIBS := $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS) $(X11_LIBS)
 $(MUVIEW_X11_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUVIEW_X11) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUVIEW_X11) : $(MUVIEW_X11_OBJ)
-	$(LINK_CMD) $(X11_LIBS)
+$(eval $(call gen_link_target,MUVIEW_X11))
 
 ifeq "$(HAVE_CURL)" "yes"
 MUVIEW_X11_CURL := $(OUT)/mupdf-x11-curl
 MUVIEW_X11_CURL_OBJ := $(addprefix $(OUT)/platform/x11/curl/, x11_main.o x11_image.o pdfapp.o curl_stream.o)
+MUVIEW_X11_CURL_LIBS := $(MUVIEW_X11_LIBS) $(CURL_LIB) $(CURL_LIBS) $(SYS_CURL_DEPS)
 $(MUVIEW_X11_CURL_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUVIEW_X11_CURL) : $(MUPDF_LIB) $(THIRD_LIBS) $(CURL_LIB)
-$(MUVIEW_X11_CURL) : $(MUVIEW_X11_CURL_OBJ)
-	$(LINK_CMD) $(X11_LIBS) $(CURL_LIBS) $(SYS_CURL_DEPS)
+$(eval $(call gen_link_target,MUVIEW_X11_CURL))
 endif
 endif
 
@@ -281,24 +343,26 @@ ifeq "$(HAVE_WIN32)" "yes"
 MUVIEW_WIN32 := $(OUT)/mupdf
 MUVIEW_WIN32_OBJ := $(addprefix $(OUT)/platform/x11/, win_main.o pdfapp.o win_res.o)
 $(MUVIEW_WIN32_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUVIEW_WIN32) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUVIEW_WIN32) : $(MUVIEW_WIN32_OBJ)
-	$(LINK_CMD) $(WIN32_LIBS)
+$(MUVIEW_WIN32) : $(MUVIEW_WIN32_OBJ) $(MUPDF_LIB) $(THIRD_LIBS)
+	$(LINK_CMD) $(MUVIEW_WIN32_OBJ) $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS) $(WIN32_LIBS)
 endif
 
 MUVIEW := $(MUVIEW_X11) $(MUVIEW_WIN32)
 MUVIEW_CURL := $(MUVIEW_X11_CURL) $(MUVIEW_WIN32_CURL)
 
-INSTALL_APPS := $(MUDRAW) $(MUTOOL) $(MUVIEW) $(MUJSTEST) $(MUVIEW_CURL)
+INSTALL_APPS := $(MUDRAW) $(MUTOOL) $(MUJSTEST) $(MUVIEW) $(MUVIEW_CURL)
 
 # --- Examples ---
 
-examples: $(OUT)/example $(OUT)/multi-threaded
+EXAMPLE1 := $(OUT)/example
+EXAMPLE1_LIBS := docs/example.c $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS)
+$(eval $(call gen_link_target,EXAMPLE1))
 
-$(OUT)/example: docs/example.c $(MUPDF_LIB) $(THIRD_LIBS)
-	$(LINK_CMD) $(CFLAGS)
-$(OUT)/multi-threaded: docs/multi-threaded.c $(MUPDF_LIB) $(THIRD_LIBS)
-	$(LINK_CMD) $(CFLAGS) -lpthread
+EXAMPLE2 := $(OUT)/multi-threaded
+EXAMPLE2_LIBS := docs/multi-threaded.c $(MUPDF_LIB) $(THIRD_LIBS) $(LIBS) -lpthread
+$(eval $(call gen_link_target,EXAMPLE2))
+
+examples: $(EXAMPLE1) $(EXAMPLE2)
 
 # --- Update version string header ---
 

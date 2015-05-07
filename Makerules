@@ -81,6 +81,9 @@ SYS_JBIG2DEC_LIBS = -ljbig2dec
 SYS_JPEG_LIBS = -ljpeg
 SYS_ZLIB_LIBS = -lz
 
+BUILD_MUPDF_SHARED_LIB ?= yes
+CFLAGS += -fPIC
+
 endif
 
 # The following section is an example of how to simply do cross-compilation
@@ -125,6 +128,7 @@ CC = i686-w64-mingw32-gcc
 LD = i686-w64-mingw32-gcc
 AR = i686-w64-mingw32-ar
 WINDRES = i686-w64-mingw32-windres
+DLLTOOL = i686-w64-mingw32-dlltool
 CROSSCOMPILE=yes
 endif
 
@@ -133,7 +137,12 @@ CC = x86_64-w64-mingw32-gcc
 LD = x86_64-w64-mingw32-gcc
 AR = x86_64-w64-mingw32-ar
 WINDRES = x86_64-w64-mingw32-windres
+DLLTOOL = x86_64-w64-mingw32-dlltool
 CROSSCOMPILE=yes
+endif
+
+ifneq "$(filter %-cross-mingw32,$(OS))" ""
+BUILD_MUPDF_DLL ?= yes
 endif
 
 # Most variables when building for iOS are set up in ios/build_libs.sh,
