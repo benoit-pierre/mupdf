@@ -155,7 +155,7 @@ $(OUT)/platform/x11/%.o : platform/x11/%.c | $(ALL_DIR)
 	$(CC_CMD) $(X11_CFLAGS)
 
 $(OUT)/platform/x11/%.o: platform/x11/%.rc | $(OUT)
-	windres $< $@
+	$(WINDRES) $< $@
 
 $(OUT)/platform/x11/curl/%.o : platform/x11/%.c | $(ALL_DIR)
 	$(CC_CMD) $(X11_CFLAGS) $(CURL_CFLAGS) -DHAVE_CURL

@@ -124,6 +124,7 @@ ifeq "$(OS)" "w64_x86-cross-mingw32"
 CC = i686-w64-mingw32-gcc
 LD = i686-w64-mingw32-gcc
 AR = i686-w64-mingw32-ar
+WINDRES = i686-w64-mingw32-windres
 CROSSCOMPILE=yes
 endif
 
@@ -131,6 +132,7 @@ ifeq "$(OS)" "w64_amd64-cross-mingw32"
 CC = x86_64-w64-mingw32-gcc
 LD = x86_64-w64-mingw32-gcc
 AR = x86_64-w64-mingw32-ar
+WINDRES = x86_64-w64-mingw32-windres
 CROSSCOMPILE=yes
 endif
 
@@ -164,7 +166,8 @@ LD = $(TIZEN_TOOLS)ld $(TIZEN_FLAGS)
 CROSSCOMPILE=yes
 endif
 
-ifeq "$(OS)" "MINGW"
+ifneq "$(filter MINGW %-cross-mingw32,$(OS))" ""
+WINDRES ?= windres
 WIN32_LIBS=-lcomdlg32 -lgdi32
 HAVE_WIN32=yes
 LDFLAGS += -Wl,-subsystem,windows
